@@ -8,7 +8,6 @@ use App\Models\VendorProduct;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -564,28 +563,26 @@ class FirestoreBridgeController extends Controller
     /**
      * Fetch active promotions with optional restaurant filter.
      */
-
     public function fetchActivePromotions(Request $request): \Illuminate\Http\JsonResponse
     {
         $Zoneid = $request->query('zoneId');
 
-        $cacheKey = "promo_zone_" . $Zoneid;
+//        if (!$restaurantId) {
+//            return $this->error('restaurant_id is required', 422);
+//        }
 
-        $promotions = Cache::remember($cacheKey, 300, function () use ($Zoneid) {
-
-            return DB::table('promotions')
-                ->where('zoneId', $Zoneid)
-                ->where('isAvailable', 1)
-                ->orderByDesc('id') // ensures index optimization
-                ->get();
-
-        });
+        $promotions = DB::table('promotions')
+            ->where('zoneId', $Zoneid)
+            ->where('isAvailable', 1)
+            ->get();
 
         return $this->success([
             'promotions' => $promotions,
             'count' => $promotions->count(),
         ]);
-    }   /**
+    }
+
+    /**
      * Get active promotion for a specific product in a restaurant.
      */
     public function getActivePromotionForProduct(Request $request): \Illuminate\Http\JsonResponse
