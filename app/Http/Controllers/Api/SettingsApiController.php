@@ -11,14 +11,14 @@ use \Illuminate\Http\JsonResponse;
 
 class SettingsApiController extends Controller
 {
-//    public function __construct()
-//    {
-//        $this->middleware('auth')->except([
-//            'mobileSettings',
-//            'getDeliveryChargeSettings',
-//            'getVendorAttributes',
-//        ]);
-//    }
+    public function __construct()
+    {
+        $this->middleware('auth')->except([
+            'mobileSettings',
+            'getDeliveryChargeSettings',
+            'getVendorAttributes',
+        ]);
+    }
 
     /**
      * Get all settings needed for the layout
