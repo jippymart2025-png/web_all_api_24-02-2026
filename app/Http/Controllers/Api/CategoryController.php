@@ -21,87 +21,78 @@ class CategoryController extends Controller
      * - Filter where show_in_homepage = true AND publish = true
      * - Order by display order (if available)
      */
+
+
     public function home(Request $request = null)
     {
         try {
-            /** ---------------------------------------
-             * CACHE: Check cache FIRST - before any DB operations
-             * This ensures zero database hits when cache exists
-             * ------------------------------------- */
+
             $cacheKey = 'categories_home_v1';
-            $cacheTTL = 86400; // 24 hours (86400 seconds)
+            $cacheTTL = 3600; // 1 hour (3600 seconds)
 
-            // Check if force refresh is requested
-            $forceRefresh = $request && $request->boolean('refresh', false);
+            $forceRefresh = $request?->boolean('refresh', false);
 
-            // CRITICAL: Check cache BEFORE any database operations
-            // This ensures zero DB queries when cache exists
-            if (!$forceRefresh) {
-                $cachedResponse = Cache::get($cacheKey);
-                if ($cachedResponse !== null) {
-                    // Return cached response immediately - NO database queries executed
-                    return response()->json($cachedResponse);
-                }
+            // 🔄 If force refresh requested, clear cache first
+            if ($forceRefresh) {
+                Cache::forget($cacheKey);
             }
 
-            /** ---------------------------------------
-             * Only execute DB queries if cache miss or force refresh
-             * ------------------------------------- */
-            // Get categories for homepage
-            $categories = VendorCategory::where('show_in_homepage', true)
-                ->where('publish', 1)
-                ->orderBy('title', 'asc') // Default order by title
-                ->get();
+            return response()->json(
+                Cache::remember($cacheKey, $cacheTTL, function () {
 
-            // Format response
-            $data = $categories->map(function ($category) {
-                return [
-                    'id' => $category->id,
-                    'title' => $category->title ?? '',
-                    'photo' => $category->photo ?? '',
-                    'show_in_homepage' => (bool) $category->show_in_homepage,
-                    'publish' => (bool) $category->publish,
-                    'description' => $category->description ?? '',
-                    'vType' => $category->vType ?? null,
-                ];
-            });
+                    $categories = VendorCategory::query()
+                        ->where('show_in_homepage', true)
+                        ->where('publish', 1)
+                        ->orderBy('title', 'asc')
+                        ->get([
+                            'id',
+                            'title',
+                            'photo',
+                            'show_in_homepage',
+                            'publish',
+                            'description',
+                            'vType'
+                        ]);
 
-            /** ---------------------------------------
-             * RESPONSE: Build and cache response
-             * ------------------------------------- */
-            $response = [
-                'success' => true,
-                'data' => $data
-            ];
+                    $data = $categories->map(function ($category) {
 
-            // Cache the response
-            try {
-                Cache::put($cacheKey, $response, $cacheTTL);
-            } catch (\Throwable $cacheError) {
-                Log::warning('Failed to cache home categories response', [
-                    'cache_key' => $cacheKey,
-                    'error' => $cacheError->getMessage(),
-                ]);
-                // Continue without caching if cache fails
-            }
+                        // ✅ Remove "jippy" (case insensitive)
+                        $cleanTitle = trim(
+                            preg_replace('/\bjippy\b/i', '', $category->title ?? '')
+                        );
 
-            return response()->json($response);
+                        return [
+                            'id' => $category->id,
+                            'title' => $cleanTitle,
+                            'photo' => $category->photo ?? '',
+                            'show_in_homepage' => (bool) $category->show_in_homepage,
+                            'publish' => (bool) $category->publish,
+                            'description' => $category->description ?? '',
+                            'vType' => $category->vType ?? null,
+                        ];
+                    });
 
-        } catch (\Exception $e) {
-            Log::error('Get Home Categories Error: ' . $e->getMessage(), [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                    return [
+                        'success' => true,
+                        'data' => $data
+                    ];
+                })
+            );
+
+        } catch (\Throwable $e) {
+
+            Log::error('Get Home Categories Error', [
+                'message' => $e->getMessage(),
+                'trace'   => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch home categories',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'error'   => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
-    }
-
-    /**
+    }    /**
      * Get All Categories
      * GET /api/categories
      * OPTIMIZED: Cached for 24 hours for fast loading
@@ -109,37 +100,39 @@ class CategoryController extends Controller
     public function index(Request $request = null)
     {
         try {
-            /** ---------------------------------------
-             * CACHE: Check cache FIRST - before any DB operations
-             * This ensures zero database hits when cache exists
-             * ------------------------------------- */
-            $cacheKey = 'categories_all_v1';
-            $cacheTTL = 86400; // 24 hours (86400 seconds)
 
-            // Check if force refresh is requested
+            $cacheKey = 'categories_jippy_v1';
+            $cacheTTL = 3600; // 24 hours
+
             $forceRefresh = $request && $request->boolean('refresh', false);
 
-            // CRITICAL: Check cache BEFORE any database operations
-            // This ensures zero DB queries when cache exists
+            // ✅ Return cache first (zero DB hit)
             if (!$forceRefresh) {
                 $cachedResponse = Cache::get($cacheKey);
                 if ($cachedResponse !== null) {
-                    // Return cached response immediately - NO database queries executed
                     return response()->json($cachedResponse);
                 }
             }
 
             /** ---------------------------------------
-             * Only execute DB queries if cache miss or force refresh
+             * DB Query (ONLY if cache miss)
              * ------------------------------------- */
+
             $categories = VendorCategory::where('publish', 1)
-                ->orderBy('title', 'asc')
+                ->where('title', 'LIKE', '%jippy%') // ✅ Fetch only jippy titles
+//                ->orderBy('title', 'asc')
                 ->get();
 
             $data = $categories->map(function ($category) {
+
+                // ✅ Remove "jippy" (case insensitive)
+                $cleanTitle = trim(
+                    preg_replace('/\bjippy\b/i', '', $category->title ?? '')
+                );
+
                 return [
                     'id' => $category->id,
-                    'title' => $category->title ?? '',
+                    'title' => $cleanTitle, // ✅ cleaned title
                     'photo' => $category->photo ?? '',
                     'show_in_homepage' => (bool) $category->show_in_homepage,
                     'publish' => (bool) $category->publish,
@@ -148,30 +141,20 @@ class CategoryController extends Controller
                 ];
             });
 
-            /** ---------------------------------------
-             * RESPONSE: Build and cache response
-             * ------------------------------------- */
             $response = [
                 'success' => true,
                 'data' => $data,
                 'count' => $data->count()
             ];
 
-            // Cache the response
-            try {
-                Cache::put($cacheKey, $response, $cacheTTL);
-            } catch (\Throwable $cacheError) {
-                Log::warning('Failed to cache all categories response', [
-                    'cache_key' => $cacheKey,
-                    'error' => $cacheError->getMessage(),
-                ]);
-                // Continue without caching if cache fails
-            }
+            // ✅ Cache result
+            Cache::put($cacheKey, $response, $cacheTTL);
 
             return response()->json($response);
 
         } catch (\Exception $e) {
-            Log::error('Get Categories Error: ' . $e->getMessage());
+
+            Log::error('Get Jippy Categories Error: ' . $e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -180,7 +163,6 @@ class CategoryController extends Controller
             ], 500);
         }
     }
-
     /**
      * Get Single Category
      * GET /api/categories/{id}

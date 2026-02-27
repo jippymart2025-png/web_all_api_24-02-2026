@@ -694,6 +694,7 @@ Route::get('/referral/my-referrals', [ReferralController::class, 'myReferrals'])
 
 Route::post('/checkin', [CheckinController::class, 'checkin']);
 Route::get('/checkin/status', [CheckinController::class, 'status']);
+Route::get('/wallet/config', [SettingsApiController::class, 'walletConfig']);
 
 
 

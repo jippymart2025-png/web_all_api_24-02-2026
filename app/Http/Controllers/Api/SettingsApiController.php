@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -651,6 +652,39 @@ class SettingsApiController extends Controller
         }
     }
 
+    public function walletConfig(Request $request): JsonResponse
+    {
+        try {
+            $cacheKey = 'wallet_config_v1';
+            $forceRefresh = $request->boolean('refresh', false);
+
+            if ($forceRefresh) {
+                Cache::forget($cacheKey);
+            }
+
+            $data = Cache::remember($cacheKey, 86400, function () {
+                return Setting::getByDocument('wallet_config');
+            });
+
+            if (empty($data)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Wallet configuration not found'
+                ], 404);
+            }
+
+            return response()->json($data);
+
+        } catch (\Throwable $e) {
+
+            Log::error('Wallet config error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to fetch wallet configuration'
+            ], 500);
+        }
+    }
 
 }
 

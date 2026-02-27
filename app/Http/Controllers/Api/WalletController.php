@@ -7,6 +7,7 @@ use App\Models\AppUser;
 use App\Models\CoinLedger;
 use App\Models\CustomerWallet;
 use App\Models\MoneyWalletLedger;
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use App\Models\User;
 use Illuminate\Support\Facades\Validator;
@@ -176,7 +177,7 @@ class WalletController extends Controller
     {
         $request->validate([
             'firebase_id' => 'required|string',
-            'coins' => 'required|integer|min:1000',
+            'coins' => 'required|integer|min:100',
             'idempotency_key' => 'nullable|string'
         ]);
 
@@ -220,7 +221,30 @@ class WalletController extends Controller
                 }
             }
 
-            // 4️⃣ Balance check
+            // 4️⃣ Convert coins → paise
+            // 1000 coins = ₹100 = 10000 paise
+            $amountPaise = ($coins / 1000) * 10000;
+
+            // 5️⃣ Daily redeem limit (₹100 default)
+            $dailyLimitPaise = Setting::getField(
+                'wallet_config',
+                'daily_redeem_limit_paise',
+                10000 // fallback ₹100
+            );
+
+            $todayRedeemed = MoneyWalletLedger::where('user_id', $user->id)
+                ->where('type', 'COIN_REDEEM_CREDIT')
+                ->whereDate('created_at', today())
+                ->sum('amount_paise');
+
+            if (($todayRedeemed + $amountPaise) > $dailyLimitPaise) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Daily redeem limit of ₹' . ($dailyLimitPaise / 100) . ' reached. Try again tomorrow.'
+                ], 400);
+            }
+
+            // 6️⃣ Balance check
             if ($wallet->coin_balance < $coins) {
                 return response()->json([
                     'success' => false,
@@ -228,15 +252,12 @@ class WalletController extends Controller
                 ], 400);
             }
 
-            // 5️⃣ Convert coins → paise
-            $amountPaise = ($coins / 1000) * 10000;
-
-            // 6️⃣ Update balances
+            // 7️⃣ Update balances
             $wallet->coin_balance -= $coins;
             $wallet->money_balance_paise += $amountPaise;
             $wallet->save();
 
-            // 7️⃣ Insert coin ledger
+            // 8️⃣ Insert coin ledger
             CoinLedger::create([
                 'user_id' => $user->id,
                 'type' => 'REDEEM_DEBIT',
@@ -245,7 +266,7 @@ class WalletController extends Controller
                 'idempotency_key' => $request->idempotency_key
             ]);
 
-            // 8️⃣ Insert money ledger
+            // 9️⃣ Insert money ledger
             MoneyWalletLedger::create([
                 'user_id' => $user->id,
                 'type' => 'COIN_REDEEM_CREDIT',
@@ -266,5 +287,4 @@ class WalletController extends Controller
             ]);
         });
     }
-
 }

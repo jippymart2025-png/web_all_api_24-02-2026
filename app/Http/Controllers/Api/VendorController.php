@@ -7,6 +7,7 @@ use App\Models\vendor_products;
 use App\Models\VendorCategory;
 use App\Models\Coupon;
 use App\Models\Vendor;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -93,101 +94,124 @@ class VendorController extends Controller
     }
 
 
-public function getNearestRestaurantByCategory(Request $request, $categoryId)
-{
-    $request->validate([
-        'latitude'  => 'required|numeric|between:-90,90',
-        'longitude' => 'required|numeric|between:-180,180',
-        'radius'    => 'nullable|numeric|min:0',
-        'filter'    => 'nullable|in:distance,rating',
-    ]);
 
-    $lat    = (float) $request->latitude;
-    $lng    = (float) $request->longitude;
-    $radius = (float) ($request->radius ?? 10);
-    $filter = $request->filter ?? 'distance';
+    public function getNearestRestaurantByCategory(Request $request, $categoryId)
+    {
+        $request->validate([
+            'latitude'  => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+            'radius'    => 'nullable|numeric|min:0',
+            'filter'    => 'nullable|in:distance,rating',
+        ]);
 
-    /* ---------- BOUNDING BOX ---------- */
-    $earthRadius = 6371;
+        // Round for better cache hits
+        $lat    = round((float) $request->latitude, 4);
+        $lng    = round((float) $request->longitude, 4);
+        $radius = (float) ($request->radius ?? 10);
+        $filter = $request->filter ?? 'distance';
 
-    $latDelta = rad2deg($radius / $earthRadius);
-    $lngDelta = rad2deg($radius / $earthRadius / cos(deg2rad($lat)));
+        $cacheKey = "nearby_restaurants_{$categoryId}_{$lat}_{$lng}_{$radius}_{$filter}";
+        $cacheTTL = 180; // 3 minutes
 
-    $minLat = $lat - $latDelta;
-    $maxLat = $lat + $latDelta;
-    $minLng = $lng - $lngDelta;
-    $maxLng = $lng + $lngDelta;
+        $response = Cache::remember($cacheKey, $cacheTTL, function ()
+        use ($lat, $lng, $radius, $filter, $categoryId) {
 
-    /* ---------- QUERY ---------- */
-    $vendors = Vendor::query()
-        ->where('publish', 1)
-        ->where('isOpen', 1) // manual override still respected
-        ->whereRaw("JSON_CONTAINS(categoryID, JSON_QUOTE(?))", [$categoryId])
-        ->whereBetween('latitude', [$minLat, $maxLat])
-        ->whereBetween('longitude', [$minLng, $maxLng])
-        ->select('*')
-        ->selectRaw(
-            '(6371 * acos(
-                cos(radians(?)) * cos(radians(latitude)) *
-                cos(radians(longitude) - radians(?)) +
-                sin(radians(?)) * sin(radians(latitude))
-            )) AS distance',
-            [$lat, $lng, $lat]
-        )
-        ->having('distance', '<=', $radius)
-        ->when($filter === 'rating', function ($q) {
-            $q->orderByRaw(
-                '(CASE WHEN reviewsCount > 0
-                THEN reviewsSum / reviewsCount
-                ELSE 0 END) DESC'
-            );
-        }, function ($q) {
-            $q->orderBy('distance');
-        })
-        ->limit(50)
-        ->get();
+            $earthRadius = 6371;
 
-    /* ---------- JSON DECODE + ACTUAL OPEN STATUS ---------- */
-    $jsonFields = [
-        'photos',
-        'workingHours',
-        'categoryID',
-        'categoryTitle',
-        'filters',
-        'adminCommission',
-        'specialDiscount',
-        'restaurantMenuPhotos',
-        'g',
-    ];
+            $latDelta = rad2deg($radius / $earthRadius);
+            $lngDelta = rad2deg($radius / $earthRadius / cos(deg2rad($lat)));
 
-    $vendors->transform(function ($vendor) use ($jsonFields) {
+            $minLat = $lat - $latDelta;
+            $maxLat = $lat + $latDelta;
+            $minLng = $lng - $lngDelta;
+            $maxLng = $lng + $lngDelta;
 
-        // Decode JSON fields
-        foreach ($jsonFields as $field) {
-            if (!empty($vendor->$field) && is_string($vendor->$field)) {
-                $decoded = json_decode($vendor->$field, true);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    $vendor->$field = $decoded;
+            $distanceSql = '(6371 * acos(
+            cos(radians(?)) * cos(radians(latitude)) *
+            cos(radians(longitude) - radians(?)) +
+            sin(radians(?)) * sin(radians(latitude))
+        ))';
+
+            $vendors = Vendor::query()
+                ->where('publish', 1)
+                ->where('isOpen', 1)
+                ->whereRaw("JSON_CONTAINS(categoryID, JSON_QUOTE(?))", [$categoryId])
+                ->whereBetween('latitude', [$minLat, $maxLat])
+                ->whereBetween('longitude', [$minLng, $maxLng])
+                ->whereRaw("$distanceSql <= ?", [$lat, $lng, $lat, $radius])
+                ->select([
+                    'id',
+                    'title',
+                    'latitude',
+                    'longitude',
+                    'reviewsSum',
+                    'reviewsCount',
+                    'isOpen',
+                    'workingHours',
+                    'photos',
+                    'categoryID',
+                    'categoryTitle',
+                    'filters',
+                    'adminCommission',
+                    'specialDiscount',
+                    'restaurantMenuPhotos',
+                    'g'
+                ])
+                ->selectRaw("$distanceSql AS distance", [$lat, $lng, $lat])
+                ->when($filter === 'rating', function ($q) {
+                    $q->orderByRaw(
+                        '(CASE WHEN reviewsCount > 0
+                        THEN reviewsSum / reviewsCount
+                        ELSE 0 END) DESC'
+                    );
+                }, function ($q) {
+                    $q->orderBy('distance');
+                })
+                ->limit(50)
+                ->get();
+
+            $jsonFields = [
+                'photos',
+                'workingHours',
+                'categoryID',
+                'categoryTitle',
+                'filters',
+                'adminCommission',
+                'specialDiscount',
+                'restaurantMenuPhotos',
+                'g',
+            ];
+
+            $vendors->transform(function ($vendor) use ($jsonFields) {
+
+                foreach ($jsonFields as $field) {
+                    if (!empty($vendor->$field) && is_string($vendor->$field)) {
+                        $decoded = json_decode($vendor->$field, true);
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $vendor->$field = $decoded;
+                        }
+                    }
                 }
-            }
-        }
 
-        // ✅ REAL-TIME OPEN STATUS
-        $vendor->actualIsOpen = $this->calculateActualIsOpen(
-            (bool) $vendor->isOpen,
-            $vendor->workingHours ?? null
-        );
+                $vendor->distance = round($vendor->distance, 2);
 
-        return $vendor;
-    });
+                $vendor->actualIsOpen = $this->calculateActualIsOpen(
+                    (bool) $vendor->isOpen,
+                    $vendor->workingHours ?? null
+                );
 
-    return response()->json([
-        'success' => true,
-        'count'   => $vendors->count(),
-        'data'    => $vendors,
-    ]);
-}
+                return $vendor;
+            });
 
+            return [
+                'success' => true,
+                'count'   => $vendors->count(),
+                'data'    => $vendors,
+            ];
+        });
+
+        return response()->json($response);
+    }
     protected function calculateActualIsOpen(bool $isOpenFlag, ?array $workingHours): bool
     {
         // TIER 1: Manual Override Check
