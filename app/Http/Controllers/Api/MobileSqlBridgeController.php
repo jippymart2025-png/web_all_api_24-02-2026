@@ -835,6 +835,7 @@ class MobileSqlBridgeController extends Controller
                     }
                 }
 
+
                 /*
 |--------------------------------------------------------------
 | 6️⃣  Reward Coins Based on Order Total
