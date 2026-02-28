@@ -1,9 +1,10 @@
 <?php
 
-use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\Api\ChatadminController;
+use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\ChatDriverContoller;
 use App\Http\Controllers\Api\ChatRestaurantController;
+use App\Http\Controllers\Api\CheckinController;
 use App\Http\Controllers\Api\DriverControllerLogin;
 use App\Http\Controllers\Api\DriverUserController;
 use App\Http\Controllers\Api\DriverSqlBridgeController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Api\MobileSqlBridgeController;
 use App\Http\Controllers\Api\OrderSupportController;
 use App\Http\Controllers\Api\productcontroller;
 use App\Http\Controllers\Api\FirestoreBridgeController;
+use App\Http\Controllers\Api\ReferralController;
 use App\Http\Controllers\Api\RestaurantAppSettingController;
 use App\Http\Controllers\Api\restaurantControllerLogin;
 use App\Http\Controllers\Api\restaurantUserController;
@@ -21,11 +23,11 @@ use App\Http\Controllers\Api\VendorController;
 use App\Http\Controllers\Api\Vendor_Reviews;
 use App\Http\Controllers\Api\WalletTransactionController;
 use App\Http\Controllers\Api\WalletApiController;
-use App\Http\Controllers\OrderController;
-use App\Http\Controllers\SettingsController;
+//use App\Http\Controllers\OrderController;
+//use App\Http\Controllers\SettingsController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\PaymentController;
+//use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ZoneController;
 use App\Http\Controllers\Api\RestaurantController;
 use App\Http\Controllers\Api\CategoryController;
@@ -39,7 +41,6 @@ use App\Http\Controllers\Api\FavoriteController;
 use App\Http\Controllers\Api\WalletController;
 use App\Http\Controllers\Api\OrderApiController;
 use App\Http\Controllers\Api\MartItemController;
-use App\Http\Controllers\ChatController;
 use App\Http\Controllers\Api\SwiggySearchController;
 use App\Http\Controllers\Api\FirestoreUtilsController;
 use App\Http\Controllers\Api\CacheController;
@@ -47,9 +48,9 @@ use App\Http\Controllers\Api\CacheController;
 
 
 
-Route::get('/settings/ringtone', [SettingsController::class, 'getRingtone']);
-Route::get('/orders/latest-id', [OrderController::class, 'getLatestOrderId']);
-Route::get('/orders/get/{id}', [OrderController::class, 'getOrder']);
+//Route::get('/settings/ringtone', [SettingsController::class, 'getRingtone']);
+//Route::get('/orders/latest-id', [OrderController::class, 'getLatestOrderId']);
+//Route::get('/orders/get/{id}', [OrderController::class, 'getOrder']);
 
 /*
 |--------------------------------------------------------------------------
@@ -87,11 +88,11 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 //Route::delete('/app-users/{id}', [AppUserController::class, 'destroy']);
 //Route::patch('/app-users/{id}/active', [AppUserController::class, 'setActive']);
 // SQL users listing (replaces client-side Firebase usage on Users page)
-Route::get('/app-users', [AdminUserController::class, 'index']);
-Route::post('/app-users', [AdminUserController::class, 'store']);
-Route::delete('/app-users/{id}', [AdminUserController::class, 'destroy']);
-Route::patch('/app-users/{id}/active', [AdminUserController::class, 'setActive']);
-Route::get('/app-users/export', [App\Http\Controllers\AdminUserController::class, 'export']);
+//Route::get('/app-users', [AdminUserController::class, 'index']);
+//Route::post('/app-users', [AdminUserController::class, 'store']);
+//Route::delete('/app-users/{id}', [AdminUserController::class, 'destroy']);
+//Route::patch('/app-users/{id}/active', [AdminUserController::class, 'setActive']);
+//Route::get('/app-users/export', [App\Http\Controllers\AdminUserController::class, 'export']);
 
 
 Route::get('/settings/mobile', [SettingsApiController::class, 'mobileSettings'])
