@@ -16,6 +16,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -576,6 +577,7 @@ class MobileSqlBridgeController extends Controller
             'admin_surge_fee'            => ['nullable', 'numeric', 'min:0'],
             'special_discount'           => ['nullable', 'array'],
             'calculated_charges'         => ['nullable', 'array'],
+//            'merchant_price'             => ['nullable', 'numeric', 'min:0'],
             'tax_setting'                => ['nullable', 'array'],
             'takeaway'                   => ['nullable', 'boolean'],
             'vendor_id'                  => ['required', 'string'],
@@ -624,16 +626,13 @@ class MobileSqlBridgeController extends Controller
         |--------------------------------------------------------------------------
         */
         $cartItems  = $request->input('cart_items');
-        $productIds = collect($cartItems)->pluck('id')->filter()->toArray();
 
-        $merchantPrices = DB::table('vendor_products')
-            ->whereIn('id', $productIds)
-            ->pluck('merchant_price', 'id');
+//        $merchantPrices = $request->input('merchant_price');
 
-        $updatedCartItems = collect($cartItems)->map(function ($item) use ($merchantPrices) {
-            $item['merchant_price'] = (float) ($merchantPrices[$item['id']] ?? 0);
-            return $item;
-        })->toArray();
+//        $updatedCartItems = collect($cartItems)->map(function ($item) use ($merchantPrices) {
+//            $item['merchant_price'] = (float) ($merchantPrices[$item['id']] ?? 0);
+//            return $item;
+//        })->toArray();
 
         /*
         |--------------------------------------------------------------------------
@@ -676,7 +675,7 @@ class MobileSqlBridgeController extends Controller
         |--------------------------------------------------------------------------
         */
         $promotion = 0;
-        foreach ($updatedCartItems as $item) {
+        foreach ($cartItems as $item) {
             if (!empty($item['promo_id'])) {
                 $promotion = 1;
                 break;
@@ -714,7 +713,7 @@ class MobileSqlBridgeController extends Controller
             'specialDiscount'     => json_encode($specialDiscount),
             'calculatedCharges'   => $request->calculated_charges ? json_encode($request->calculated_charges) : null,
             'taxSetting'          => $request->tax_setting ? json_encode($request->tax_setting) : null,
-            'products'            => json_encode($updatedCartItems),
+            'products'            => json_encode($cartItems),
             'address'             => json_encode($selectedAddress),
             'author'              => json_encode($authorPayload),
             'notes'               => $request->notes,
@@ -786,37 +785,53 @@ class MobileSqlBridgeController extends Controller
                 | 4️⃣  Referral – Credit Referrer 100 Coins (First Order Only)
                 |--------------------------------------------------------------
                 */
+                /*
+                |--------------------------------------------------------------------------
+                | 4️⃣  Referral – Credit Referrer Coins (From Settings)
+                |--------------------------------------------------------------------------
+                */
+
                 $referral = DB::table('referrals')
                     ->where('referee_user_id', $user->id)
                     ->first();
 
                 if ($referral) {
+
                     $orderCount = RestaurantOrder::where('authorID', $authorId)->count();
 
                     if ($orderCount === 1 && !$referral->rewarded_at) {
-                        $referrerWallet = CustomerWallet::firstOrCreate(
-                            ['user_id' => $referral->referrer_user_id],
-                            ['coin_balance' => 0, 'money_balance_paise' => 0]
+
+                        // 🔥 Fetch referral coins from settings
+                        $referralCoins = (int) $this->getWalletConfigValue(
+                            'wallet_config.referral.referee_first_order_coins',
+                            0
                         );
 
-                        $referrerWallet->coin_balance += 100;
-                        $referrerWallet->save();
+                        if ($referralCoins > 0) {
 
-                        DB::table('coin_ledger')->insert([
-                            'user_id'          => $referral->referrer_user_id,
-                            'type'             => 'REFERRAL',
-                            'coins'            => 100,
-                            'reference_id'     => $orderId,
-                            'idempotency_key'  => 'referral_' . $orderId,
-                            'created_at' => Carbon::now()->format('Y-m-d H:i:s'),
-                        ]);
+                            $referrerWallet = CustomerWallet::firstOrCreate(
+                                ['user_id' => $referral->referrer_user_id],
+                                ['coin_balance' => 0, 'money_balance_paise' => 0]
+                            );
 
-                        DB::table('referrals')
-                            ->where('id', $referral->id)
-                            ->update([
-                                'status'     => 'REWARDED',
-                                'created_at' => Carbon::now()->format('Y-m-d H:i:s'),
+                            $referrerWallet->coin_balance += $referralCoins;
+                            $referrerWallet->save();
+
+                            DB::table('coin_ledger')->insert([
+                                'user_id'         => $referral->referrer_user_id,
+                                'type'            => 'REFERRAL',
+                                'coins'           => $referralCoins,
+                                'reference_id'    => $orderId,
+                                'idempotency_key' => 'referral_' . $orderId,
                             ]);
+
+                            DB::table('referrals')
+                                ->where('id', $referral->id)
+                                ->update([
+                                    'status'      => 'REWARDED',
+                                    'rewarded_at' => now(),
+                                ]);
+                        }
                     }
                 }
 
@@ -895,6 +910,20 @@ class MobileSqlBridgeController extends Controller
             'admin_surge_fee' => $adminFee,
             'total_surge_fee' => $totalSurgeFee,
         ], 'Order placed successfully');
+    }
+
+
+    private function getWalletConfigValue(string $path, $default = 0)
+    {
+        $config = Cache::remember('settings', 3600, function () {
+            $row = DB::table('settings')
+                ->where('document_name', 'wallet_config')
+                ->first();
+
+            return $row ? json_decode($row->fields, true) : [];
+        });
+
+        return data_get($config, $path, $default);
     }
 
     /* Return surge fee information for an order billing record.
