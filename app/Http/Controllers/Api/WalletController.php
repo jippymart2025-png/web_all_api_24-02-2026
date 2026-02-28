@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+<<<<<<< HEAD
 use App\Models\AppUser;
 use App\Models\CoinLedger;
 use App\Models\CustomerWallet;
 use App\Models\MoneyWalletLedger;
 use App\Models\Setting;
+=======
+>>>>>>> 7523479ce668eee692d0fc3cd7f6644c3aaeff22
 use Illuminate\Http\Request;
 use App\Models\User;
 use Illuminate\Support\Facades\Validator;
@@ -68,6 +71,7 @@ class WalletController extends Controller
             ], 500);
         }
     }
+<<<<<<< HEAD
 
 
     public function getWallet(Request $request)
@@ -287,4 +291,6 @@ class WalletController extends Controller
             ]);
         });
     }
+=======
+>>>>>>> 7523479ce668eee692d0fc3cd7f6644c3aaeff22
 }
