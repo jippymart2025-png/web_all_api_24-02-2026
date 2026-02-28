@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppSetting;
+use App\Models\CoinLedger;
+use App\Models\CustomerWallet;
 use App\Models\MartItem;
+use App\Models\MoneyWalletLedger;
 use App\Models\User;
 use App\Models\Vendor;
 use App\Models\VendorProduct;
@@ -13,6 +16,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -384,72 +388,262 @@ class MobileSqlBridgeController extends Controller
 
 
 
+//    public function createOrder(Request $request): JsonResponse
+//    {
+//        $validator = Validator::make($request->all(), [
+//            'author_id' => ['nullable', 'string'],
+//            'cart_items' => ['required', 'array', 'min:1'],
+//            'cart_items.*.id' => ['nullable', 'string'],
+//            'selected_address' => ['required', 'array'],
+//            'payment_method' => ['required', 'string'],
+//            'total_amount' => ['required', 'numeric', 'min:0'],
+//            'delivery_charges' => ['nullable', 'numeric', 'min:0'],
+//            'tip_amount' => ['nullable', 'numeric', 'min:0'],
+//            'coupon_id' => ['nullable', 'string'],
+//            'coupon_code' => ['nullable', 'string'],
+//            'discount' => ['nullable', 'numeric', 'min:0'],
+//            'promotion' => ['nullable', 'numeric'],
+//            'notes' => ['nullable', 'string'],
+//            'schedule_time' => ['nullable', 'date'],
+//            'surge_percent' => ['nullable', 'numeric', 'min:0'],
+//            'admin_surge_fee' => ['nullable', 'numeric', 'min:0'],
+//            'special_discount' => ['nullable', 'array'],
+//            'calculated_charges' => ['nullable', 'array'],
+//            'tax_setting' => ['nullable', 'array'],
+//            'takeaway' => ['nullable', 'boolean'],
+//            'vendor_id' => ['nullable', 'string'],
+//        ]);
+//
+//        if ($validator->fails()) {
+//            return $this->error('Validation failed', 422, (array) $validator->errors());
+//        }
+//
+//        $authorId = $request->input('author_id') ?? $this->resolveUserId($request);
+//        if (!$authorId) {
+//            return $this->error('Author ID is required', 422);
+//        }
+//
+//        $user = $this->resolveUser($authorId);
+//        $authorPayload = $this->mapUserPayload($user);
+//
+//        $cartItems = $request->input('cart_items');
+//        $selectedAddress = $request->input('selected_address');
+//
+//        /**
+//         * ✅ FETCH merchant_price FROM products TABLE
+//         */
+//        $productIds = collect($cartItems)->pluck('id')->filter()->toArray();
+//
+//        $merchantPrices = DB::table('vendor_products')
+//            ->whereIn('id', $productIds)
+//            ->pluck('merchant_price', 'id'); // returns [id => merchant_price]
+//
+//        $updatedCartItems = collect($cartItems)->map(function ($item) use ($merchantPrices) {
+//            $item['merchant_price'] = (float) ($merchantPrices[$item['id']] ?? 0);
+//            return $item;
+//        })->toArray();
+//
+//        $specialDiscount = array_merge([
+//            'special_discount' => 0,
+//            'special_discount_label' => null,
+//            'specialType' => null,
+//        ], $request->input('special_discount', []));
+//
+//        $deliveryCharges = (float) $request->input('delivery_charges', 0);
+//        $tipAmount = (float) $request->input('tip_amount', 0);
+//        $discount = (float) $request->input('discount', 0);
+//        $totalAmount = (float) $request->input('total_amount', 0);
+//        $surgePercent = (int) $request->input('surge_percent', 0);
+//
+//        $adminFee = $request->filled('admin_surge_fee')
+//            ? (int) $request->admin_surge_fee
+//            : ($surgePercent > 0 ? $this->resolveAdminSurgeFeeValue() : 0);
+//
+//        $totalSurgeFee = $surgePercent + $adminFee;
+//
+//        $scheduleTime = $request->filled('schedule_time')
+//            ? Carbon::parse($request->schedule_time)->toISOString()
+//            : null;
+//
+//        $vendorContext = $this->resolveVendorContext($request->vendor_id);
+//        $adminCommission = $vendorContext['commission'];
+//
+//        $orderId = $this->generateOrderId();
+//        $now = Carbon::now()->toISOString();
+//
+//        $promotion = 0;
+//        foreach ($updatedCartItems as $item) {
+//            if (!empty($item['promo_id'])) {
+//                $promotion = 1;
+//                break;
+//            }
+//        }
+//
+//        $orderData = [
+//            'id'                    => $orderId,
+//            'vendorID'              => (string) $request->vendor_id,
+//            'authorID'              => $authorId,
+//            'status'                => 'Order Placed',
+//            'createdAt'             => $now,
+//            'scheduleTime'          => $scheduleTime,
+//            'deliveryCharge'        => $deliveryCharges,
+//            'discount'              => $discount,
+//            'tip_amount'            => $tipAmount,
+//            'takeAway'              => $request->boolean('takeaway'),
+//            'payment_method'        => $request->payment_method,
+//            'couponId'              => $request->coupon_id ?? '',
+//            'couponCode'            => $request->coupon_code ?? '',
+//            'promotion'             => $promotion,
+//            'ToPay'                 => $totalAmount,
+//            'toPayAmount'           => $totalAmount,
+//            'surge_fee'             => $totalSurgeFee,
+//            'adminCommission'       => (string) $adminCommission['amount'],
+//            'adminCommissionType'   => $adminCommission['commissionType'],
+//            'specialDiscount'       => json_encode($specialDiscount),
+//            'calculatedCharges'     => $request->calculated_charges ? json_encode($request->calculated_charges) : null,
+//            'taxSetting'            => $request->tax_setting ? json_encode($request->tax_setting) : null,
+//            'products'              => json_encode($updatedCartItems), // ✅ updated here
+//            'address'               => json_encode($selectedAddress),
+//            'author'                => json_encode($authorPayload),
+//            'notes'                 => $request->notes,
+//        ];
+//
+//        try {
+//            DB::transaction(function () use (
+//                $orderData,
+//                $orderId,
+//                $totalAmount,
+//                $surgePercent,
+//                $adminFee,
+//                $request,
+//                $authorId
+//            ) {
+//                RestaurantOrder::create($orderData);
+//
+//                if ($request->filled('coupon_id')) {
+//                    $this->storeCouponUsage($authorId, $request->coupon_id);
+//                }
+//
+//                DB::table('order_billing')->updateOrInsert(
+//                    ['orderId' => $orderId],
+//                    [
+//                        'id'               => (string) Str::uuid(),
+//                        'createdAt'        => now()->toISOString(),
+//                        'orderId'          => $orderId,
+//                        'ToPay'            => $totalAmount,
+//                        'surge_fee'        => $surgePercent,
+//                        'admin_surge_fee'  => $adminFee,
+//                        'total_surge_fee'  => $adminFee + $surgePercent,
+//                    ]
+//                );
+//            });
+//        } catch (\Throwable $e) {
+//            Log::error('Order Failed', [
+//                'orderId' => $orderId,
+//                'error' => $e->getMessage(),
+//            ]);
+//
+//            return $this->error('Failed to place order, try again later.', 500);
+//        }
+//
+//        return $this->success([
+//            'order_id'        => $orderId,
+//            'surge_fee'       => $surgePercent,
+//            'admin_surge_fee' => $adminFee,
+//            'total_surge_fee' => $totalSurgeFee,
+//        ], 'Order placed successfully');
+//    }
+
+
+
     public function createOrder(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'author_id' => ['nullable', 'string'],
-            'cart_items' => ['required', 'array', 'min:1'],
-            'cart_items.*.id' => ['nullable', 'string'],
-            'selected_address' => ['required', 'array'],
-            'payment_method' => ['required', 'string'],
-            'total_amount' => ['required', 'numeric', 'min:0'],
-            'delivery_charges' => ['nullable', 'numeric', 'min:0'],
-            'tip_amount' => ['nullable', 'numeric', 'min:0'],
-            'coupon_id' => ['nullable', 'string'],
-            'coupon_code' => ['nullable', 'string'],
-            'discount' => ['nullable', 'numeric', 'min:0'],
-            'promotion' => ['nullable', 'numeric'],
-            'notes' => ['nullable', 'string'],
-            'schedule_time' => ['nullable', 'date'],
-            'surge_percent' => ['nullable', 'numeric', 'min:0'],
-            'admin_surge_fee' => ['nullable', 'numeric', 'min:0'],
-            'special_discount' => ['nullable', 'array'],
-            'calculated_charges' => ['nullable', 'array'],
-            'tax_setting' => ['nullable', 'array'],
-            'takeaway' => ['nullable', 'boolean'],
-            'vendor_id' => ['nullable', 'string'],
+            'author_id'                  => ['nullable', 'string'],
+            'cart_items'                 => ['required', 'array', 'min:1'],
+            'cart_items.*.id'            => ['nullable', 'string'],
+            'selected_address'           => ['required', 'array'],
+            'payment_method'             => ['required', 'string'],
+            'total_amount'               => ['required', 'numeric', 'min:0'],
+            'delivery_charges'           => ['nullable', 'numeric', 'min:0'],
+            'tip_amount'                 => ['nullable', 'numeric', 'min:0'],
+            'coupon_id'                  => ['nullable', 'string'],
+            'coupon_code'                => ['nullable', 'string'],
+            'discount'                   => ['nullable', 'numeric', 'min:0'],
+            'promotion'                  => ['nullable', 'numeric'],
+            'notes'                      => ['nullable', 'string'],
+            'schedule_time'              => ['nullable', 'date'],
+            'surge_percent'              => ['nullable', 'numeric', 'min:0'],
+            'admin_surge_fee'            => ['nullable', 'numeric', 'min:0'],
+            'special_discount'           => ['nullable', 'array'],
+            'calculated_charges'         => ['nullable', 'array'],
+//            'merchant_price'             => ['nullable', 'numeric', 'min:0'],
+            'tax_setting'                => ['nullable', 'array'],
+            'takeaway'                   => ['nullable', 'boolean'],
+            'vendor_id'                  => ['required', 'string'],
+            // ✅ Wallet / payment-split fields
+            'wallet_amount'              => ['nullable', 'numeric', 'min:0'],
+            'payment_gateway_amount'     => ['nullable', 'numeric', 'min:0'],
         ]);
 
         if ($validator->fails()) {
             return $this->error('Validation failed', 422, (array) $validator->errors());
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Resolve Author
+        |--------------------------------------------------------------------------
+        */
         $authorId = $request->input('author_id') ?? $this->resolveUserId($request);
         if (!$authorId) {
             return $this->error('Author ID is required', 422);
         }
 
         $user = $this->resolveUser($authorId);
+        if (!$user) {
+            return $this->error('User not found', 404);
+        }
+
         $authorPayload = $this->mapUserPayload($user);
 
-        $cartItems = $request->input('cart_items');
+        /*
+        |--------------------------------------------------------------------------
+        | Payment Split Validation
+        |--------------------------------------------------------------------------
+        */
+        $walletAmount = (float) ($request->wallet_amount ?? 0);
+        $pgAmount     = (float) ($request->payment_gateway_amount ?? 0);
+        $totalAmount  = (float) $request->total_amount;
+
+        if (round($walletAmount + $pgAmount, 2) !== round($totalAmount, 2)) {
+            return $this->error('Invalid payment split: wallet_amount + payment_gateway_amount must equal total_amount', 422);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | Cart Items – Enrich with merchant_price
+        |--------------------------------------------------------------------------
+        */
+        $cartItems  = $request->input('cart_items');
+
+//        $merchantPrices = $request->input('merchant_price');
+
+//        $updatedCartItems = collect($cartItems)->map(function ($item) use ($merchantPrices) {
+//            $item['merchant_price'] = (float) ($merchantPrices[$item['id']] ?? 0);
+//            return $item;
+//        })->toArray();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Scalar Inputs
+        |--------------------------------------------------------------------------
+        */
         $selectedAddress = $request->input('selected_address');
-
-        /**
-         * ✅ FETCH merchant_price FROM products TABLE
-         */
-        $productIds = collect($cartItems)->pluck('id')->filter()->toArray();
-
-        $merchantPrices = DB::table('vendor_products')
-            ->whereIn('id', $productIds)
-            ->pluck('merchant_price', 'id'); // returns [id => merchant_price]
-
-        $updatedCartItems = collect($cartItems)->map(function ($item) use ($merchantPrices) {
-            $item['merchant_price'] = (float) ($merchantPrices[$item['id']] ?? 0);
-            return $item;
-        })->toArray();
-
-        $specialDiscount = array_merge([
-            'special_discount' => 0,
-            'special_discount_label' => null,
-            'specialType' => null,
-        ], $request->input('special_discount', []));
-
         $deliveryCharges = (float) $request->input('delivery_charges', 0);
-        $tipAmount = (float) $request->input('tip_amount', 0);
-        $discount = (float) $request->input('discount', 0);
-        $totalAmount = (float) $request->input('total_amount', 0);
-        $surgePercent = (int) $request->input('surge_percent', 0);
+        $tipAmount       = (float) $request->input('tip_amount', 0);
+        $discount        = (float) $request->input('discount', 0);
+        $surgePercent    = (int)   $request->input('surge_percent', 0);
 
         $adminFee = $request->filled('admin_surge_fee')
             ? (int) $request->admin_surge_fee
@@ -461,49 +655,75 @@ class MobileSqlBridgeController extends Controller
             ? Carbon::parse($request->schedule_time)->toISOString()
             : null;
 
-        $vendorContext = $this->resolveVendorContext($request->vendor_id);
-        $adminCommission = $vendorContext['commission'];
+        $specialDiscount = array_merge([
+            'special_discount'       => 0,
+            'special_discount_label' => null,
+            'specialType'            => null,
+        ], $request->input('special_discount', []));
 
-        $orderId = $this->generateOrderId();
-        $now = Carbon::now()->toISOString();
+        /*
+        |--------------------------------------------------------------------------
+        | Vendor Context & Commission
+        |--------------------------------------------------------------------------
+        */
+        $vendorContext    = $this->resolveVendorContext($request->vendor_id);
+        $adminCommission  = $vendorContext['commission'];
 
+        /*
+        |--------------------------------------------------------------------------
+        | Promotion Flag (from cart items)
+        |--------------------------------------------------------------------------
+        */
         $promotion = 0;
-        foreach ($updatedCartItems as $item) {
+        foreach ($cartItems as $item) {
             if (!empty($item['promo_id'])) {
                 $promotion = 1;
                 break;
             }
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Build Order Payload
+        |--------------------------------------------------------------------------
+        */
+        $orderId = $this->generateOrderId();
+        $now     = Carbon::now()->toISOString();
+
         $orderData = [
-            'id'                    => $orderId,
-            'vendorID'              => (string) $request->vendor_id,
-            'authorID'              => $authorId,
-            'status'                => 'Order Placed',
-            'createdAt'             => $now,
-            'scheduleTime'          => $scheduleTime,
-            'deliveryCharge'        => $deliveryCharges,
-            'discount'              => $discount,
-            'tip_amount'            => $tipAmount,
-            'takeAway'              => $request->boolean('takeaway'),
-            'payment_method'        => $request->payment_method,
-            'couponId'              => $request->coupon_id ?? '',
-            'couponCode'            => $request->coupon_code ?? '',
-            'promotion'             => $promotion,
-            'ToPay'                 => $totalAmount,
-            'toPayAmount'           => $totalAmount,
-            'surge_fee'             => $totalSurgeFee,
-            'adminCommission'       => (string) $adminCommission['amount'],
-            'adminCommissionType'   => $adminCommission['commissionType'],
-            'specialDiscount'       => json_encode($specialDiscount),
-            'calculatedCharges'     => $request->calculated_charges ? json_encode($request->calculated_charges) : null,
-            'taxSetting'            => $request->tax_setting ? json_encode($request->tax_setting) : null,
-            'products'              => json_encode($updatedCartItems), // ✅ updated here
-            'address'               => json_encode($selectedAddress),
-            'author'                => json_encode($authorPayload),
-            'notes'                 => $request->notes,
+            'id'                  => $orderId,
+            'vendorID'            => (string) $request->vendor_id,
+            'authorID'            => $authorId,
+            'status'              => 'Order Placed',
+            'createdAt'           => $now,
+            'scheduleTime'        => $scheduleTime,
+            'deliveryCharge'      => $deliveryCharges,
+            'discount'            => $discount,
+            'tip_amount'          => $tipAmount,
+            'takeAway'            => $request->boolean('takeaway'),
+            'payment_method'      => $request->payment_method,
+            'couponId'            => $request->coupon_id ?? '',
+            'couponCode'          => $request->coupon_code ?? '',
+            'promotion'           => $promotion,
+            'ToPay'               => $totalAmount,
+            'toPayAmount'         => $totalAmount,
+            'surge_fee'           => $totalSurgeFee,
+            'adminCommission'     => (string) $adminCommission['amount'],
+            'adminCommissionType' => $adminCommission['commissionType'],
+            'specialDiscount'     => json_encode($specialDiscount),
+            'calculatedCharges'   => $request->calculated_charges ? json_encode($request->calculated_charges) : null,
+            'taxSetting'          => $request->tax_setting ? json_encode($request->tax_setting) : null,
+            'products'            => json_encode($cartItems),
+            'address'             => json_encode($selectedAddress),
+            'author'              => json_encode($authorPayload),
+            'notes'               => $request->notes,
         ];
 
+        /*
+        |--------------------------------------------------------------------------
+        | Transaction
+        |--------------------------------------------------------------------------
+        */
         try {
             DB::transaction(function () use (
                 $orderData,
@@ -511,47 +731,203 @@ class MobileSqlBridgeController extends Controller
                 $totalAmount,
                 $surgePercent,
                 $adminFee,
-                $request,
-                $authorId
+                $walletAmount,
+                $user,
+                $authorId,
+                $request
             ) {
+
+                /*
+                |--------------------------------------------------------------
+                | 1️⃣  Deduct Wallet Balance (if used)
+                |--------------------------------------------------------------
+                */
+                if ($walletAmount > 0) {
+                    $deductPaise = (int) round($walletAmount * 100);
+
+                    $wallet = CustomerWallet::where('user_id', $user->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$wallet || $wallet->money_balance_paise < $deductPaise) {
+                        throw new \Exception('Insufficient wallet balance');
+                    }
+
+                    $wallet->money_balance_paise -= $deductPaise;
+                    $wallet->save();
+
+                    MoneyWalletLedger::create([
+                        'user_id'      => $user->id,
+                        'type'         => 'ORDER_DEBIT',
+                        'amount_paise' => -$deductPaise,
+                        'reference_id' => $orderId,
+                    ]);
+                }
+
+                /*
+                |--------------------------------------------------------------
+                | 2️⃣  Create Order
+                |--------------------------------------------------------------
+                */
                 RestaurantOrder::create($orderData);
 
+                /*
+                |--------------------------------------------------------------
+                | 3️⃣  Coupon Usage
+                |--------------------------------------------------------------
+                */
                 if ($request->filled('coupon_id')) {
                     $this->storeCouponUsage($authorId, $request->coupon_id);
                 }
 
+                /*
+                |--------------------------------------------------------------
+                | 4️⃣  Referral – Credit Referrer 100 Coins (First Order Only)
+                |--------------------------------------------------------------
+                */
+                /*
+                |--------------------------------------------------------------------------
+                | 4️⃣  Referral – Credit Referrer Coins (From Settings)
+                |--------------------------------------------------------------------------
+                */
+
+                $referral = DB::table('referrals')
+                    ->where('referee_user_id', $user->id)
+                    ->first();
+
+                if ($referral) {
+
+                    $orderCount = RestaurantOrder::where('authorID', $authorId)->count();
+
+                    if ($orderCount === 1 && !$referral->rewarded_at) {
+
+                        // 🔥 Fetch referral coins from settings
+                        $referralCoins = (int) $this->getWalletConfigValue(
+                            'wallet_config.referral.referee_first_order_coins',
+                            0
+                        );
+
+                        if ($referralCoins > 0) {
+
+                            $referrerWallet = CustomerWallet::firstOrCreate(
+                                ['user_id' => $referral->referrer_user_id],
+                                ['coin_balance' => 0, 'money_balance_paise' => 0]
+                            );
+
+                            $referrerWallet->coin_balance += $referralCoins;
+                            $referrerWallet->save();
+
+                            DB::table('coin_ledger')->insert([
+                                'user_id'         => $referral->referrer_user_id,
+                                'type'            => 'REFERRAL',
+                                'coins'           => $referralCoins,
+                                'reference_id'    => $orderId,
+                                'idempotency_key' => 'referral_' . $orderId,
+                            ]);
+
+                            DB::table('referrals')
+                                ->where('id', $referral->id)
+                                ->update([
+                                    'status'      => 'REWARDED',
+                                    'rewarded_at' => now(),
+                                ]);
+                        }
+                    }
+                }
+
+
+                /*
+|--------------------------------------------------------------
+| 6️⃣  Reward Coins Based on Order Total
+|--------------------------------------------------------------
+*/
+                $coinsEarned = (int) round($totalAmount); // 1₹ = 1 coin
+
+                if ($coinsEarned > 0) {
+
+                    // Lock wallet row
+                    $wallet = CustomerWallet::where('user_id', $user->id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$wallet) {
+                        $wallet = CustomerWallet::create([
+                            'user_id' => $user->id,
+                            'coin_balance' => 0,
+                            'money_balance_paise' => 0
+                        ]);
+                    }
+
+                    // Add coins
+                    $wallet->coin_balance += $coinsEarned;
+                    $wallet->save();
+
+                    // Insert coin ledger entry
+                    CoinLedger::create([
+                        'user_id' => $user->id,
+                        'type' => 'ORDER_CREDIT',
+                        'coins' => $coinsEarned,
+                        'reference_id' => $orderId,
+                        'idempotency_key' => 'order_reward_' . $orderId,
+                        'metadata' => json_encode([
+                            'order_total' => $totalAmount
+                        ])
+                    ]);
+                }
+
+                /*
+                |--------------------------------------------------------------
+                | 5️⃣  Billing Record
+                |--------------------------------------------------------------
+                */
                 DB::table('order_billing')->updateOrInsert(
                     ['orderId' => $orderId],
                     [
-                        'id'               => (string) Str::uuid(),
-                        'createdAt'        => now()->toISOString(),
-                        'orderId'          => $orderId,
-                        'ToPay'            => $totalAmount,
-                        'surge_fee'        => $surgePercent,
-                        'admin_surge_fee'  => $adminFee,
-                        'total_surge_fee'  => $adminFee + $surgePercent,
+                        'id'              => (string) Str::uuid(),
+                        'createdAt'       => now()->toISOString(),
+                        'orderId'         => $orderId,
+                        'ToPay'           => $totalAmount,
+                        'surge_fee'       => $surgePercent,
+                        'admin_surge_fee' => $adminFee,
+                        'total_surge_fee' => $adminFee + $surgePercent,
                     ]
                 );
             });
+
         } catch (\Throwable $e) {
             Log::error('Order Failed', [
                 'orderId' => $orderId,
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
             ]);
 
-            return $this->error('Failed to place order, try again later.', 500);
+            return $this->error($e->getMessage(), 500);
         }
 
         return $this->success([
             'order_id'        => $orderId,
+            'wallet_used'     => $walletAmount,
+            'gateway_paid'    => $pgAmount,
             'surge_fee'       => $surgePercent,
             'admin_surge_fee' => $adminFee,
             'total_surge_fee' => $totalSurgeFee,
         ], 'Order placed successfully');
     }
 
-    /**
-     * Return surge fee information for an order billing record.
+
+    private function getWalletConfigValue(string $path, $default = 0)
+    {
+        $config = Cache::remember('settings', 3600, function () {
+            $row = DB::table('settings')
+                ->where('document_name', 'wallet_config')
+                ->first();
+
+            return $row ? json_decode($row->fields, true) : [];
+        });
+
+        return data_get($config, $path, $default);
+    }
+
+    /* Return surge fee information for an order billing record.
      */
     public function getOrderSurgeFee(string $orderId): JsonResponse
     {

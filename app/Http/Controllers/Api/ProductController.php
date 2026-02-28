@@ -215,7 +215,7 @@ class ProductController extends Controller
                     'vendorID', 'price', 'disPrice', 'quantity', 'publish',
                     'isAvailable', 'veg', 'nonveg', 'photo', 'photos',
                     'addOnsTitle', 'addOnsPrice', 'item_attribute',
-                    'product_specification', 'reviewsCount', 'reviewsSum'
+                    'product_specification', 'reviewsCount', 'reviewsSum','options','merchant_price','available_timings'
                 ])
                 ->where('vendorID', $vendorId)
                 ->where('isAvailable', 1)
@@ -223,7 +223,7 @@ class ProductController extends Controller
                     $q->whereNull('publish')
                       ->orWhere('publish', 1)
                       ->orWhere('publish', '1');
-               
+
                 });
 
             /** Search */
@@ -333,6 +333,13 @@ class ProductController extends Controller
             $transformedProducts = collect();
 
             foreach ($products as $product) {
+
+                $timeAvailable = $this->isProductAvailableNow($product->available_timings);
+                // OPTION 1️⃣ → Skip product completely
+                if (!$timeAvailable) {
+                    continue;
+                }
+
                 $category = $categories->get($product->categoryID);
 
                 $data = $this->transformProduct(
@@ -341,11 +348,30 @@ class ProductController extends Controller
                     $category
                 );
 
+                /** ✅ Decode options safely */
+                $options = null;
+
+                if (!empty($product->options)) {
+
+                    // If already array (JSON column casted)
+                    if (is_array($product->options)) {
+                        $options = $product->options;
+                    }
+                    // If string JSON
+                    elseif (is_string($product->options)) {
+                        $decoded = json_decode($product->options, true);
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $options = $decoded;
+                        }
+                    }
+                }
+                $data['merchant_price'] = $product->merchant_price;
+                $data['is_available'] = $data['is_available'] && $timeAvailable;
+                $data['options']  = $options;
                 $data['vendorID'] = $vendorId;
 
                 $transformedProducts->push($data);
             }
-
             /** ---------------------------------------
              * Offer-only Filter (NO CHANGE)
              * ------------------------------------- */
@@ -417,6 +443,40 @@ class ProductController extends Controller
     }
 
 
+
+    protected function isProductAvailableNow($availableTimings): bool
+    {
+        if (empty($availableTimings)) {
+            return true; // No timing means always available
+        }
+
+        if (is_string($availableTimings)) {
+            $availableTimings = json_decode($availableTimings, true);
+        }
+
+        if (!is_array($availableTimings)) {
+            return true;
+        }
+
+        $now = Carbon::now();
+        $currentDay = $now->format('l'); // Monday, Tuesday...
+        $currentTime = $now->format('H:i');
+
+        foreach ($availableTimings as $dayData) {
+            if (($dayData['day'] ?? '') === $currentDay) {
+                foreach ($dayData['timeslot'] ?? [] as $slot) {
+                    $from = $slot['from'] ?? null;
+                    $to   = $slot['to'] ?? null;
+
+                    if ($from && $to && $currentTime >= $from && $currentTime <= $to) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
     /**
      * Fetch single product details by product ID.
      *
@@ -487,8 +547,12 @@ class ProductController extends Controller
         ];
     }
 
-    protected function transformProduct(VendorProduct $product, Collection $promotions, ?VendorCategory $category = null): array
-    {
+    protected function transformProduct(
+        VendorProduct $product,
+        Collection $promotions,
+        ?VendorCategory $category = null
+    ): array {
+
         $safeDecode = fn ($value) => $this->safeDecode($value);
         $promotion = optional($promotions->get($product->id))->first();
 
@@ -502,13 +566,21 @@ class ProductController extends Controller
                 ? $discountPrice
                 : $originalPrice);
 
+        // 🔥 TIME CHECK HERE
+        $timeAvailable = $this->isProductAvailableNow($product->available_timings);
+
+        $baseAvailable = $this->coerceBoolean($product->isAvailable);
+
         return [
             'id' => $product->id,
             'name' => $product->name,
             'description' => $product->description,
             'category_id' => $product->categoryID,
             'category_title' => $category->title ?? $product->categoryTitle,
-            'is_available' => $this->coerceBoolean($product->isAvailable),
+
+            // 🔥 FINAL AVAILABILITY
+            'is_available' => $baseAvailable && $timeAvailable,
+
             'nonveg' => $this->coerceBoolean($product->nonveg),
             'veg' => $this->coerceBoolean($product->veg),
             'photo' => $product->photo,
