@@ -685,7 +685,6 @@ Route::post('/driver/wallet-transactions', [DriverSqlBridgeController::class, 'g
 Route::get('/get-chats', [DriverSqlBridgeController::class, 'getChats']);
 
 
-<<<<<<< HEAD
 Route::get('/wallet', [WalletController::class, 'getWallet']);
 Route::get('/wallet/coins/ledger', [WalletController::class, 'coinLedger']);
 Route::post('/wallet/coins/redeem', [WalletController::class, 'redeemCoins']);
@@ -696,9 +695,9 @@ Route::get('/referral/my-referrals', [ReferralController::class, 'myReferrals'])
 Route::post('/checkin', [CheckinController::class, 'checkin']);
 Route::get('/checkin/status', [CheckinController::class, 'status']);
 Route::get('/wallet/config', [SettingsApiController::class, 'walletConfig']);
-=======
 
->>>>>>> 7523479ce668eee692d0fc3cd7f6644c3aaeff22
+
+
 
 
 
